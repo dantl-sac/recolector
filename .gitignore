@@ -1,0 +1,18 @@
+# Modelos de Inteligencia Artificial (Demasiado pesados)
+*.pt
+
+# Carpetas de Datasets locales
+TACO/
+dataset_taco/
+
+# Resultados y logs de entrenamiento de YOLO
+runs/
+
+# Caché y entornos virtuales de Python
+__pycache__/
+.venv/
+.ipynb_checkpoints/
+*.pyc
+
+# Archivos de configuración locales
+.vscode/

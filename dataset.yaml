@@ -1,0 +1,12 @@
+# Configuración de Datos ARVE ELITE
+path: ./dataset  # Ruta principal
+train: images/train  # Fotos para aprender
+val: images/val      # Fotos para examen
+
+# Clases (Nombres de lo que quieres reconocer)
+names:
+  0: botella_plastico
+  1: lata_aluminio
+  2: carton
+  3: papel
+  4: persona
