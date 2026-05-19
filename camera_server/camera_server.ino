@@ -20,24 +20,24 @@ IPAddress subnet(255, 255, 255, 0);
 // ================================================
 // PINES FÍSICOS DEL ESP32-CAM
 // ================================================
-// CAMBIO: I2C a GPIO21 y GPIO19 (usados por cámara pero soportan I2C alternativo)
-#define I2C_SDA     21  // CAMBIO: desde GPIO15
-#define I2C_SCL     19  // CAMBIO: desde GPIO14
+// I2C usa GPIO que NO entran en conflicto con cámara
+#define I2C_SDA     12  // Disponible
+#define I2C_SCL     13  // Disponible
 
 // Sensor Ultrasónico FRONTAL
-#define TRIG_F      13
-#define ECHO_F      12
+#define TRIG_F      14  // Disponible
+#define ECHO_F      15  // Disponible
 
 // Buzzer y LED RGB (via PCA9685 canales libres)
 // Los controlaremos desde el PCA9685 para no usar pines del ESP32
 
 // Sensor de Color TCS3200
-// *** AJUSTADOS PARA ESP32-CAM COMPACTO AI-THINKER ***
+// *** AJUSTADOS PARA ESP32-CAM COMPACTO AI-THINKER - SIN CONFLICTOS ***
 #define TCS_S0      2   // Disponible
 #define TCS_S1      4   // Disponible
-#define TCS_S2      5   // GPIO5 disponible (Y2 cámara)
-#define TCS_S3      14  // GPIO14 disponible (librado de I2C)
-#define TCS_OUT     15  // GPIO15 disponible (librado de I2C)
+#define TCS_S2      16  // Disponible
+#define TCS_S3      17  // Disponible
+#define TCS_OUT     33  // Disponible
 
 #define CAMERA_MODEL_AI_THINKER
 #include "camera_pins.h"
@@ -156,17 +156,17 @@ void setServo(int angulo) {
 }
 
 void setLED(int r, int g, int b) {
-    // PCA9685: 0=OFF, 4096=ON para canales LED
-    pwm.setPWM(LED_R, 0, r ? 4096 : 0);
-    pwm.setPWM(LED_G, 0, g ? 4096 : 0);
-    pwm.setPWM(LED_B, 0, b ? 4096 : 0);
+    // PCA9685: 0=OFF, 4095=ON para canales LED (máximo válido)
+    pwm.setPWM(LED_R, 0, r ? 4095 : 0);
+    pwm.setPWM(LED_G, 0, g ? 4095 : 0);
+    pwm.setPWM(LED_B, 0, b ? 4095 : 0);
 }
 
 void beep(int veces) {
     for (int i = 0; i < veces; i++) {
-        pwm.setPWM(BUZZER, 4096, 0);
+        pwm.setPWM(BUZZER, 0, 4095);    // ON (máximo válido)
         delay(100);
-        pwm.setPWM(BUZZER, 0, 4096);
+        pwm.setPWM(BUZZER, 0, 0);       // OFF
         delay(80);
     }
 }
@@ -178,13 +178,13 @@ void setMotor(int m, int speed) {
     int in2    = (m == 1) ? M1_IN2 : M2_IN2;
     speed = constrain(speed, -4095, 4095);
     if (speed > 0) {
-        pwm.setPWM(in1, 4096, 0); pwm.setPWM(in2, 0, 4096);
+        pwm.setPWM(in1, 4095, 0); pwm.setPWM(in2, 0, 4095);
         pwm.setPWM(ch_pwm, 0, speed);
     } else if (speed < 0) {
-        pwm.setPWM(in1, 0, 4096); pwm.setPWM(in2, 4096, 0);
+        pwm.setPWM(in1, 0, 4095); pwm.setPWM(in2, 4095, 0);
         pwm.setPWM(ch_pwm, 0, abs(speed));
     } else {
-        pwm.setPWM(in1, 0, 4096); pwm.setPWM(in2, 0, 4096);
+        pwm.setPWM(in1, 0, 4095); pwm.setPWM(in2, 0, 4095);
         pwm.setPWM(ch_pwm, 0, 0);
     }
 }

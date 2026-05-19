@@ -1,0 +1,30 @@
+# Dependencias para ARVE ELITE v6.0
+
+# Deep Learning & Vision
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0
+opencv-python-headless>=4.8.0
+
+# Data Augmentation
+albumentations>=1.3.0
+imgaug>=0.4.0
+
+# Bluetooth
+pybluez>=0.23
+
+# Utilities
+numpy>=1.24.0
+matplotlib>=3.7.0
+pandas>=2.0.0
+pillow>=9.5.0
+tqdm>=4.65.0
+pyyaml>=6.0
+requests>=2.31.0
+
+# Optional pero recomendado
+tensorboard>=2.14.0
+onnx>=1.15.0
+onnxruntime>=1.16.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
