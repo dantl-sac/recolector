@@ -1,0 +1,12 @@
+{
+  "focal": 615.0,
+  "class_widths_cm": {
+    "Bottle": 7.0,
+    "Other plastic bottle": 7.0,
+    "Drink can": 6.5,
+    "Food Can": 6.5,
+    "Battery": 2.5,
+    "Plastic bag": 18.0,
+    "Paper": 21.0
+  }
+}

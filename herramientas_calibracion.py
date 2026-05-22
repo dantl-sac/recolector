@@ -126,43 +126,14 @@ class CalibradorCamara:
             json.dump(config, f, indent=2)
         
         print(f"💾 Calibración guardada en {archivo}")
-        print(f"\n   Usa así en cliente_bluetooth.py:")
-        print(f"   cliente.focal_length = {self.focal_length:.0f}")
+        print("\n   Usa este focal_length en tu cliente de deteccion o control.")
+        print(f"   focal_length = {self.focal_length:.0f}")
 
 class DemostradorArveElite:
     """Demostración completa de funcionalidades"""
     
     def __init__(self):
-        self.cliente = None
         self.calibrador = CalibradorCamara()
-    
-    def demo_bluetooth(self):
-        """Demo de control por Bluetooth"""
-        print("\n" + "="*60)
-        print("   DEMO: CONTROL BLUETOOTH")
-        print("="*60)
-        
-        print("""
-        Este ejemplo muestra cómo controlar ARVE ELITE:
-        
-        1️⃣  Importar cliente
-        from cliente_bluetooth import ClienteARVEElite
-        
-        2️⃣  Crear instancia
-        cliente = ClienteARVEElite()
-        cliente.conectar()
-        
-        3️⃣  Usar comandos
-        cliente.mover(1, 2000)      # Motor 1 hacia adelante
-        cliente.servo(90)            # Cámara al frente
-        cliente.led(0, 1, 0)         # LED verde
-        cliente.beep(3)              # Buzzer 3 veces
-        cliente.status()             # Ver estado
-        
-        4️⃣  Detección de objetos
-        detecciones = cliente.detectar_objetos("imagen.jpg")
-        # Devuelve: [{'clase', 'confianza', 'distancia_cm', 'bbox'}, ...]
-        """)
     
     def demo_deteccion(self, imagen_path=None):
         """Demo de detección con modelo YOLO"""
@@ -245,10 +216,9 @@ def menu_principal():
         print("   ARVE ELITE v6.0 - HERRAMIENTAS PROFESIONALES")
         print("="*60)
         print("\n1️⃣  Calibración de Cámara")
-        print("2️⃣  Demo: Bluetooth")
-        print("3️⃣  Demo: Detección de Objetos")
-        print("4️⃣  Demo: Entrenamiento")
-        print("5️⃣  Tutorial Completo")
+        print("2️⃣  Demo: Detección de Objetos")
+        print("3️⃣  Demo: Entrenamiento")
+        print("4️⃣  Tutorial Completo")
         print("0️⃣  Salir")
         
         opcion = input("\n▶ Elige opción: ").strip()
@@ -275,17 +245,13 @@ def menu_principal():
                     break
         
         elif opcion == "2":
-            demo.demo_bluetooth()
-            input("\nPresiona Enter para continuar...")
-        
-        elif opcion == "3":
             demo.demo_deteccion()
         
-        elif opcion == "4":
+        elif opcion == "3":
             demo.demo_entrenamiento()
             input("\nPresiona Enter para continuar...")
         
-        elif opcion == "5":
+        elif opcion == "4":
             print("\n" + "="*60)
             print("   TUTORIAL COMPLETO")
             print("="*60)
@@ -300,7 +266,7 @@ def menu_principal():
             
             PASO 3: CARGAR EN ESP32
             ✓ Abre Arduino IDE
-            ✓ camera_server/camera_server_bluetooth.ino
+            ✓ camera_server/camera_server.ino
             ✓ Selecciona: Board="AI Thinker ESP32-CAM"
             ✓ Puerto y velocidad correcta
             ✓ Sube el código
@@ -310,13 +276,11 @@ def menu_principal():
             ✓ Opción 1: Calibración
             ✓ Medir objetos conocidos
             
-            PASO 5: CONTROLAR POR BLUETOOTH
-            $ python cliente_bluetooth.py
-            ✓ Conectar
-            ✓ Ver telemetría
-            ✓ Detectar objetos
+            PASO 5: CONTROLAR POR WIFI
+            ✓ Abre http://IP_DEL_ESP32/status
+            ✓ Usa /move, /servo, /led, /beep
             
-            PASO 6: MODO AUTÓNOMO
+            PASO 6: MODO AUTONOMO
             ✓ Cambiar a MODE AUTO
             ✓ Robot detecta automáticamente
             ✓ Clasifica basura

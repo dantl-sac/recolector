@@ -22,7 +22,7 @@ def entrenar():
     # Entrenar por 50 épocas (puedes subirlo a 100 para más precisión)
     # imgsz=320 para que coincida con la velocidad del ESP32
     model.train(
-        data='dataset.yaml', 
+        data='dataset_taco/dataset.yaml',
         epochs=50, 
         imgsz=320, 
         device=device,

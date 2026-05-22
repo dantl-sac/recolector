@@ -104,15 +104,14 @@ class ConfiguradorProyecto:
             "version": "6.0",
             "descripcion": "Sistema profesional de visión para detección de basura",
             "pines": {
-                "i2c_sda": 12,
-                "i2c_scl": 13,
+                "i2c_sda": 13,
+                "i2c_scl": 12,
                 "trig_f": 14,
                 "echo_f": 15,
-                "tcs_s0": 2,
-                "tcs_s1": 4,
-                "tcs_s2": 16,
-                "tcs_s3": 17,
-                "tcs_out": 33,
+                "trig_r": 16,
+                "echo_r": 4,
+                "tcs3200_opcional": False,
+                "nota": "ESP32-CAM no permite 2 HC-SR04 + TCS3200 a la vez sin expansor de pines",
             },
             "camara": {
                 "modelo": "AI Thinker ESP32-CAM",
@@ -125,10 +124,10 @@ class ConfiguradorProyecto:
                 "epocas_recomendadas": 300,
                 "tamaño_imagen": 416,
             },
-            "bluetooth": {
-                "nombre": "ARVE-ELITE-v6.0",
-                "pin": "1234",
-                "velocidad": 115200,
+            "wifi": {
+                "ssid": "ARVE-07",
+                "password": "12345678",
+                "ip": "192.168.137.100",
             },
             "calibracion": {
                 "focal_length": 615,
@@ -168,17 +167,21 @@ pip install -r requirements.txt
 python pipeline_entrenamiento_completo.py
 ```
 
-### 4️⃣ Subir Código a ESP32
+### 4️⃣ Subir Codigo a ESP32
 ```
 1. Abre Arduino IDE
-2. Archivo → Ejemplos → ESP32 → Camera → Camera Server
-3. Cambia a: camera_server/camera_server_bluetooth.ino
-4. Sube el código
+2. Archivo -> Ejemplos -> ESP32 -> Camera -> Camera Server
+3. Cambia a: camera_server/camera_server.ino
+4. Sube el codigo
 ```
 
-### 5️⃣ Controlar por Bluetooth
-```bash
-python cliente_bluetooth.py
+### 5️⃣ Controlar por WiFi
+```
+http://IP_DEL_ESP32/status
+http://IP_DEL_ESP32/move?v1=2000&v2=2000
+http://IP_DEL_ESP32/servo?ang=90
+http://IP_DEL_ESP32/led?r=0&g=1&b=0
+http://IP_DEL_ESP32/beep?n=2
 ```
 
 ## Scripts Principales
@@ -186,27 +189,24 @@ python cliente_bluetooth.py
 | Script | Propósito |
 |--------|-----------|
 | `pipeline_entrenamiento_completo.py` | Entrenamiento de principio a fin |
-| `cliente_bluetooth.py` | Control remoto por Bluetooth |
-| `herramientas_calibracion.py` | Calibración de cámara |
+| `herramientas_calibracion.py` | Calibracion de camara |
 | `entrenamiento_profesional.py` | Entrenamiento avanzado |
 
-## Comandos Bluetooth Disponibles
+## Endpoints HTTP disponibles
 
 ```
-MOVE <motor> <vel>     → Mueve motor (1-2)
-SERVO <ang>            → Mueve servo (0-180°)
-LED <r> <g> <b>        → RGB LED
-BEEP <n>               → Buzzer
-STATUS                 → Estado
-MODE <MANUAL|AUTO>     → Cambiar modo
-HELP                   → Ayuda
+/move?v1=2000&v2=2000
+/servo?ang=90
+/led?r=0&g=1&b=0
+/beep?n=2
+/status
 ```
 
-## Solución Rápida de Problemas
+## Solucion rapida de problemas
 
-**No conecta Bluetooth:**
-→ Verificar nombre: "ARVE-ELITE-v6.0"
-→ Verificar PIN: "1234"
+**No conecta WiFi:**
+→ Revisa SSID y password en el firmware
+→ Verifica que el router acepte 2.4GHz
 
 **Baja precisión:**
 → Aumentar épocas de entrenamiento
@@ -256,7 +256,7 @@ Ver: README_PROFESIONAL.md
 2. Coloca imágenes en dataset_taco/images/train/
 3. Ejecuta: python pipeline_entrenamiento_completo.py
 4. Carga código en ESP32
-5. Controla por: python cliente_bluetooth.py
+5. Controla por WiFi usando los endpoints HTTP
 
 ¡Éxito! 🚀
 """)
