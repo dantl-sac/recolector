@@ -174,29 +174,47 @@ def step_4_train_yolo():
         fliplr=0.5,
         perspective=0.0001,
         
-        project="runs/arve_elite",
+        project=str(BASE_DIR / "runs" / "arve_elite"),
         name="v7_taco_model",
         exist_ok=True,
         plots=True,
     )
     
-    return "runs/arve_elite/v7_taco_model/weights/best.pt"
+    # Buscar best.pt con ruta absoluta para evitar errores de directorio
+    best = BASE_DIR / "runs" / "arve_elite" / "v7_taco_model" / "weights" / "best.pt"
+    if not best.exists():
+        # Fallback: buscar recursivamente
+        found = list(BASE_DIR.rglob("arve_elite/**/best.pt"))
+        if found:
+            best = found[0]
+    return str(best)
 
 def step_5_export(best_model_path):
     print("\n" + "="*50)
     print(" PASO 5: VALIDACION Y EXPORTACION")
     print("="*50)
     
+    # Si la ruta directa no existe, buscar recursivamente
+    if not os.path.exists(best_model_path):
+        print(f"[!] No encontrado en {best_model_path}, buscando...")
+        found = list(BASE_DIR.rglob("**/best.pt"))
+        if found:
+            best_model_path = str(found[0])
+            print(f"[OK] Modelo encontrado en: {best_model_path}")
+    
     if os.path.exists(best_model_path):
         dest = BASE_DIR / "arve_best.pt"
         shutil.copy2(best_model_path, dest)
-        print(f"[OK] Nuevo modelo 'arve_best.pt' guardado en la raiz del proyecto.")
-        print(f"     Tamaño: {os.path.getsize(dest) / (1024*1024):.2f} MB")
-        
-        print("\n[!] EL CEREBRO ESTA LISTO PARA USARSE.")
-        print("    Ejecuta 'python arve_super_brain.py' para probarlo.")
+        size_mb = os.path.getsize(dest) / (1024*1024)
+        print(f"[OK] Nuevo modelo 'arve_best.pt' guardado ({size_mb:.1f} MB)")
+        print("\n" + "="*60)
+        print("  ✅ ENTRENAMIENTO COMPLETADO - CEREBRO LISTO")
+        print("="*60)
+        print("   Ejecuta: python arve_super_brain.py")
+        print("="*60)
     else:
-        print("[ERROR] No se genero el modelo final.")
+        print("[ERROR] No se genero el modelo final. Revisa la carpeta runs/")
+        print(f"        Buscado en: {best_model_path}")
 
 if __name__ == "__main__":
     # Fix multiprocessing on Windows
