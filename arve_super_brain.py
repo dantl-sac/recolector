@@ -1,8 +1,8 @@
 """
-ARVE SUPER BRAIN v6.0 - CEREBRO DEFINITIVO
-Integra: Servo cámara, Buzzer, LED RGB, Sensor Color,
-         2x Ultrasonido, RTX 3050 (YOLO TACO 60 clases), Búsqueda 360°
-Modelo: Usa arve_best.pt (entrenado TACO) o yolov8n.pt como respaldo
+ARVE SUPER BRAIN v7.0 - CEREBRO DEFINITIVO
+Integra: 2 Motores, 2 Servos (Pan+Tilt), 3 LEDs RGB, Sensor Color,
+         2x Ultrasonido, RTX 3050 (YOLO TACO + COCO Personas), Escaneo 360°
+Modelo: Usa arve_best.pt (entrenado TACO) y yolov8n.pt (COCO) simultaneamente
 """
 import cv2
 import numpy as np
@@ -12,7 +12,7 @@ import threading
 import urllib.request
 import urllib.error
 import torch
-import winsound
+import os
 from collections import deque
 
 # Optimización NVIDIA
@@ -25,15 +25,76 @@ ESP32_IP   = "192.168.137.100"
 URL_STREAM = f"http://{ESP32_IP}:81/"
 URL_MOVE   = f"http://{ESP32_IP}/move"
 URL_SERVO  = f"http://{ESP32_IP}/servo"
+URL_SERVO2 = f"http://{ESP32_IP}/servo2"
 URL_BEEP   = f"http://{ESP32_IP}/beep"
 URL_LED    = f"http://{ESP32_IP}/led"
 URL_STATUS = f"http://{ESP32_IP}/status"
 
-# Clases dinámicas (se definen dinámicamente al cargar el modelo)
-TRASH_CLASSES = {}
-DANGEROUS_CLASSES = set()
-OBSTACLE_CLASSES = set()
-PERSON_CLASS = 0
+# Clases dinámicas TACO
+TRASH_CLASSES = {
+    0: ("Papel Aluminio", "METAL", (200,200,0)),
+    1: ("Bateria", "PELIGROSO", (0,0,255)),
+    2: ("Blister Aluminio", "METAL", (200,200,0)),
+    3: ("Blister Carton", "CARTON", (255,200,0)),
+    4: ("Otra botella plastico", "PLASTICO", (0,255,0)),
+    5: ("Botella Plastico Transp.", "PLASTICO", (0,255,0)),
+    6: ("Botella Vidrio", "VIDRIO", (0,255,128)),
+    7: ("Tapa Plastica", "PLASTICO", (0,255,0)),
+    8: ("Tapa Metalica", "METAL", (200,200,0)),
+    9: ("Vidrio Roto", "PELIGROSO", (0,0,255)),
+    10: ("Lata Comida", "METAL", (200,200,0)),
+    11: ("Aerosol", "PELIGROSO", (0,0,255)),
+    12: ("Lata Bebida", "METAL", (200,200,0)),
+    13: ("Tubo Carton", "CARTON", (255,200,0)),
+    14: ("Otro Carton", "CARTON", (255,200,0)),
+    15: ("Carton Huevo", "CARTON", (255,200,0)),
+    16: ("Carton Bebida", "CARTON", (255,200,0)),
+    17: ("Carton Corrugado", "CARTON", (255,200,0)),
+    18: ("Carton Comida", "CARTON", (255,200,0)),
+    19: ("Caja Pizza", "CARTON", (255,200,0)),
+    20: ("Vaso Papel", "PAPEL", (255,200,0)),
+    21: ("Vaso Plastico Desc.", "PLASTICO", (0,255,0)),
+    22: ("Vaso Espuma", "PLASTICO", (0,255,0)),
+    23: ("Vaso Vidrio", "VIDRIO", (0,255,128)),
+    24: ("Otro vaso plastico", "PLASTICO", (0,255,0)),
+    25: ("Residuo Comida", "ORGANICO", (0,165,255)),
+    26: ("Jarra Vidrio", "VIDRIO", (0,255,128)),
+    27: ("Tapa Plastico", "PLASTICO", (0,255,0)),
+    28: ("Tapa Metal", "METAL", (200,200,0)),
+    29: ("Otro Plastico", "PLASTICO", (0,255,0)),
+    30: ("Papel Revista", "PAPEL", (255,200,0)),
+    31: ("Pañuelos", "PAPEL", (255,200,0)),
+    32: ("Papel Envoltura", "PAPEL", (255,200,0)),
+    33: ("Papel Normal", "PAPEL", (255,200,0)),
+    34: ("Bolsa Papel", "PAPEL", (255,200,0)),
+    35: ("Bolsa Papel Plastificada", "PLASTICO", (0,255,0)),
+    36: ("Film Plastico", "PLASTICO", (0,255,0)),
+    37: ("Anillos Six Pack", "PLASTICO", (0,255,0)),
+    38: ("Bolsa Basura", "PLASTICO", (0,255,0)),
+    39: ("Otra envoltura plastico", "PLASTICO", (0,255,0)),
+    40: ("Bolsa Plastico Simple", "PLASTICO", (0,255,0)),
+    41: ("Bolsa Polipropileno", "PLASTICO", (0,255,0)),
+    42: ("Paquete Papas", "PLASTICO", (0,255,0)),
+    43: ("Envase Untable", "PLASTICO", (0,255,0)),
+    44: ("Tupperware", "PLASTICO", (0,255,0)),
+    45: ("Envase Comida Desc.", "PLASTICO", (0,255,0)),
+    46: ("Envase Comida Espuma", "PLASTICO", (0,255,0)),
+    47: ("Otro Envase Plastico", "PLASTICO", (0,255,0)),
+    48: ("Guantes Plastico", "PLASTICO", (0,255,0)),
+    49: ("Utensilios Plastico", "PLASTICO", (0,255,0)),
+    50: ("Chapa Lata", "METAL", (200,200,0)),
+    51: ("Cuerdas", "RESIDUO", (180,180,0)),
+    52: ("Chatarra Metal", "METAL", (200,200,0)),
+    53: ("Zapato", "RESIDUO", (180,180,0)),
+    54: ("Tubo Exprimible", "PLASTICO", (0,255,0)),
+    55: ("Cañita Plastica", "PLASTICO", (0,255,0)),
+    56: ("Cañita Papel", "PAPEL", (255,200,0)),
+    57: ("Trozo Espuma", "PLASTICO", (0,255,0)),
+    58: ("Basura sin Etiqueta", "RESIDUO", (180,180,0)),
+    59: ("Cigarro", "RESIDUO", (180,180,0)),
+}
+
+DANGEROUS_CLASSES = {1, 9, 11} # Bateria, Vidrio Roto, Aerosol
 
 # Estados del robot
 class Estado:
@@ -45,94 +106,26 @@ class Estado:
     ESCANEANDO = "ESCANEANDO MATERIAL..."
 
 # ==========================================
-# IA - RTX 3050
+# IA - RTX 3050 (Modelos Duales)
 # ==========================================
-import os
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 use_half = device != "cpu"
 
-# Usar modelo TACO entrenado si existe, sino el base
-MODELO_TACO = "arve_best.pt"
-MODELO_BASE = "yolov8n.pt"
-if os.path.exists(MODELO_TACO):
-    print(f"[OK] Usando modelo TACO entrenado: {MODELO_TACO}")
-    modelo_path = MODELO_TACO
-else:
-    print(f"[INFO] Modelo TACO no encontrado, usando base: {MODELO_BASE}")
-    print(f"[INFO] Ejecuta 'lanzar_entrenamiento.py' para entrenar con 60 clases TACO")
-    modelo_path = MODELO_BASE
-
 print(f"[*] Cargando IA en: {device.upper()}")
-model = YOLO(modelo_path).to(device)
 
-# Mapeo dinámico de clases según el modelo
-is_taco_model = False
-if "Clear plastic bottle" in model.names.values() or len(model.names) == 60:
-    is_taco_model = True
-    print("[OK] Detectado modelo con clases TACO. Aplicando mapeo dinámico de TACO...")
-    PERSON_CLASS = -1  # No hay persona en TACO
-    TRASH_CLASSES = {
-        4: ("Botella Plastico",   "PLASTICO",   (0,255,0)),
-        5: ("Botella Plastico",   "PLASTICO",   (0,255,0)),
-        6: ("Botella Vidrio",     "VIDRIO",     (0,255,128)),
-        7: ("Tapa Plastica",      "PLASTICO",   (0,255,0)),
-        8: ("Chapa Metalica",     "METAL",      (200,200,0)),
-        10: ("Lata Comida",       "METAL",      (200,200,0)),
-        11: ("Aerosol",           "METAL",      (200,200,0)),
-        12: ("Lata Bebida",       "METAL",      (200,200,0)),
-        20: ("Vaso Papel",        "PAPEL",      (255,200,0)),
-        21: ("Vaso Plastico",     "PLASTICO",   (0,255,0)),
-        22: ("Vaso Tecnopor",     "RESIDUO",    (180,180,0)),
-        23: ("Vaso Vidrio",       "VIDRIO",     (0,255,128)),
-        24: ("Vaso Plastico",     "PLASTICO",   (0,255,0)),
-        25: ("Comida Organica",   "ORGANICO",   (0,165,255)),
-        26: ("Jarra Vidrio",      "VIDRIO",     (0,255,128)),
-        27: ("Tapa Plastica",     "PLASTICO",   (0,255,0)),
-        28: ("Tapa Metalica",     "METAL",      (200,200,0)),
-        29: ("Plastico",          "PLASTICO",   (0,255,0)),
-        34: ("Bolsa Papel",       "PAPEL",      (255,200,0)),
-        36: ("Envoltura",         "PLASTICO",   (0,255,0)),
-        38: ("Bolsa Basura",      "PLASTICO",   (0,255,0)),
-        40: ("Bolsa Plastico",    "PLASTICO",   (0,255,0)),
-        44: ("Tupperware",        "PLASTICO",   (0,255,0)),
-        45: ("Envase Alimento",   "PLASTICO",   (0,255,0)),
-        55: ("Cañita Plastica",   "PLASTICO",   (0,255,0)),
-        59: ("Colilla Cigarro",   "RESIDUO",    (180,180,0)),
-    }
-    DANGEROUS_CLASSES = {1}  # Batería
-    OBSTACLE_CLASSES = set()
+# Modelo 1: TACO (Basura)
+MODELO_TACO = "arve_best.pt"
+if os.path.exists(MODELO_TACO):
+    print(f"[OK] Cargando modelo TACO entrenado: {MODELO_TACO}")
+    model_taco = YOLO(MODELO_TACO).to(device)
 else:
-    print("[OK] Detectado modelo COCO estándar (yolov8n). Aplicando mapeo COCO...")
-    PERSON_CLASS = 0
-    TRASH_CLASSES = {
-        39: ("Botella",        "PLASTICO",   (0,255,0)),
-        41: ("Vaso/Taza",      "PLASTICO",   (0,255,0)),
-        45: ("Recipiente",     "PLASTICO",   (0,200,0)),
-        46: ("Botella Vino",   "VIDRIO",     (0,255,128)),
-        47: ("Copa",           "VIDRIO",     (0,255,128)),
-        48: ("Comida",         "ORGANICO",   (0,165,255)),
-        49: ("Tenedor",        "METAL",      (200,200,0)),
-        50: ("Cuchillo",       "PELIGROSO",  (0,0,255)),
-        51: ("Cuchara",        "METAL",      (200,200,0)),
-        52: ("Cascara",        "ORGANICO",   (0,165,255)),
-        53: ("Fruta",          "ORGANICO",   (0,165,255)),
-        54: ("Naranja",        "ORGANICO",   (0,165,255)),
-        56: ("Sandwich",       "ORGANICO",   (0,165,255)),
-        57: ("Pizza",          "ORGANICO",   (0,165,255)),
-        58: ("Donut",          "ORGANICO",   (0,165,255)),
-        59: ("Pastel",         "ORGANICO",   (0,165,255)),
-        60: ("Lata/Bowl",      "METAL",      (200,200,0)),
-        61: ("Bolsa",          "PLASTICO",   (0,255,0)),
-        62: ("Silla",          "OBSTACULO",  (100,100,100)),
-        67: ("Celular",        "ELECTRONICO",(255,0,255)),
-        73: ("Libro/Papel",    "PAPEL",      (255,200,0)),
-        76: ("Tijera",         "PELIGROSO",  (0,0,255)),
-        77: ("Peluche",        "RESIDUO",    (180,180,0)),
-        78: ("Secador",        "ELECTRONICO",(255,0,255)),
-        79: ("Cepillo",        "RESIDUO",    (180,180,0)),
-    }
-    DANGEROUS_CLASSES = {50, 76}
-    OBSTACLE_CLASSES = {62}
+    print(f"[WARN] Modelo TACO no encontrado. Usa 'entrenar_profesional_v7.py' para entrenarlo.")
+    model_taco = YOLO("yolov8n.pt").to(device) # fallback
+
+# Modelo 2: COCO (Personas)
+print(f"[OK] Cargando modelo COCO base para personas: yolov8n.pt")
+model_coco = YOLO("yolov8n.pt").to(device)
+PERSON_CLASS = 0
 
 # Buffer de video (siempre el más reciente)
 frame_buffer = deque(maxlen=1)
@@ -151,10 +144,11 @@ maniobra_inicio_t = 0.0
 NET_ERROR_COOLDOWN = 5.0
 last_net_error = 0.0
 
-# Variables de búsqueda 360°
-servo_pos     = 90   # Posición del servo (0=izq, 90=frente, 180=der)
-servo_dir     = 1    # Dirección del barrido: 1=derecha, -1=izquierda
-ultimo_objetivo_dir = None  # Recuerda donde vio basura por última vez
+# Variables de búsqueda 360° (Pan y Tilt)
+servo_pan_pos  = 90   # 0=izq, 90=frente, 180=der
+servo_tilt_pos = 135  # 90=frente, 135=45 grados hacia abajo (ideal para el suelo)
+scan_pan_dir   = 1
+scan_tilt_dir  = 1
 ultimo_barrido_t = 0.0
 
 # ==========================================
@@ -163,10 +157,11 @@ ultimo_barrido_t = 0.0
 target_state = {
     "v1": 0,
     "v2": 0,
-    "servo": 90,
-    "led_r": 0,
-    "led_g": 0,
-    "led_b": 1,
+    "servo_pan": 90,
+    "servo_tilt": 135,
+    "led1": (0, 0, 4095), # Estado (Azul)
+    "led2": (0, 0, 0),    # Material (Apagado)
+    "led3": (0, 4095, 0), # Alerta (Verde)
     "beep": 0
 }
 target_state_lock = threading.Lock()
@@ -174,10 +169,11 @@ target_state_lock = threading.Lock()
 current_state = {
     "v1": None,
     "v2": None,
-    "servo": None,
-    "led_r": None,
-    "led_g": None,
-    "led_b": None
+    "servo_pan": None,
+    "servo_tilt": None,
+    "led1": None,
+    "led2": None,
+    "led3": None
 }
 
 # ==========================================
@@ -190,21 +186,24 @@ def _log_net_error(context, err):
         print(f"[WARN] {context}: {err}")
         last_net_error = now
 
-# Funciones de control rápidas (actualizan el estado objetivo de inmediato sin bloquear)
 def mover(v1, v2):
     with target_state_lock:
         target_state["v1"] = v1
         target_state["v2"] = v2
 
-def servo(ang):
+def servo_pan(ang):
     with target_state_lock:
-        target_state["servo"] = ang
+        target_state["servo_pan"] = ang
 
-def led(r, g, b):
+def servo_tilt(ang):
     with target_state_lock:
-        target_state["led_r"] = r
-        target_state["led_g"] = g
-        target_state["led_b"] = b
+        target_state["servo_tilt"] = ang
+
+def led(n, r, g, b):
+    with target_state_lock:
+        if n == 1: target_state["led1"] = (r, g, b)
+        elif n == 2: target_state["led2"] = (r, g, b)
+        elif n == 3: target_state["led3"] = (r, g, b)
 
 def beep(n=1):
     with target_state_lock:
@@ -221,7 +220,7 @@ def get_status():
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
         _log_net_error("No se pudo leer /status", e)
 
-# Hilo de transmisión de comandos en segundo plano
+# Hilo de transmisión de comandos
 def command_sender_thread():
     global running
     last_heartbeat = 0.0
@@ -229,9 +228,9 @@ def command_sender_thread():
     last_servo_send = 0.0
     last_led_send = 0.0
     
-    print("[*] Hilo de control de hardware asíncrono activo (Rate Limiting habilitado)...")
+    print("[*] Hilo de control de hardware asíncrono activo...")
     while running:
-        time.sleep(0.01)  # Bucle rápido de 10ms
+        time.sleep(0.01)
         
         # 1. Beep prioritario
         beeps_to_send = 0
@@ -241,58 +240,56 @@ def command_sender_thread():
                 target_state["beep"] = 0
                 
         if beeps_to_send > 0:
-            url = f"{URL_BEEP}?n={beeps_to_send}"
             try:
-                urllib.request.urlopen(url, timeout=0.5)
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-                _log_net_error("Error enviando beep", e)
+                urllib.request.urlopen(f"{URL_BEEP}?n={beeps_to_send}", timeout=0.5)
+            except: pass
             continue
             
-        # 2. Motores, Servo y LED
         with target_state_lock:
             t_v1, t_v2 = target_state["v1"], target_state["v2"]
-            t_servo = target_state["servo"]
-            t_r, t_g, t_b = target_state["led_r"], target_state["led_g"], target_state["led_b"]
+            t_span = target_state["servo_pan"]
+            t_stilt = target_state["servo_tilt"]
+            t_l1 = target_state["led1"]
+            t_l2 = target_state["led2"]
+            t_l3 = target_state["led3"]
             
         now = time.time()
-        force_send = (now - last_heartbeat > 2.5)  # Latido de sincronización
+        force_send = (now - last_heartbeat > 2.5)
         
-        # A. Control de Motores (Limitado a una vez cada 80ms, excepto parada de emergencia)
-        es_parada_emergencia = (t_v1 == 0 and t_v2 == 0 and (current_state["v1"] != 0 or current_state["v2"] != 0))
+        # A. Motores
+        es_parada = (t_v1 == 0 and t_v2 == 0 and (current_state["v1"] != 0 or current_state["v2"] != 0))
         if force_send or t_v1 != current_state["v1"] or t_v2 != current_state["v2"]:
-            if es_parada_emergencia or (now - last_motor_send >= 0.08):
-                url = f"{URL_MOVE}?v1={t_v1}&v2={t_v2}"
+            if es_parada or (now - last_motor_send >= 0.08):
                 try:
-                    urllib.request.urlopen(url, timeout=0.08)
+                    urllib.request.urlopen(f"{URL_MOVE}?v1={t_v1}&v2={t_v2}", timeout=0.08)
                     current_state["v1"], current_state["v2"] = t_v1, t_v2
-                    last_motor_send = now
-                    last_heartbeat = now
-                except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-                    _log_net_error("Error enviando movimiento", e)
+                    last_motor_send = last_heartbeat = now
+                except Exception as e: _log_net_error("Move error", e)
                     
-        # B. Control de Servo (Limitado a una vez cada 120ms)
-        if force_send or t_servo != current_state["servo"]:
+        # B. Servos
+        if force_send or t_span != current_state["servo_pan"] or t_stilt != current_state["servo_tilt"]:
             if now - last_servo_send >= 0.12:
-                url = f"{URL_SERVO}?ang={t_servo}"
                 try:
-                    urllib.request.urlopen(url, timeout=0.08)
-                    current_state["servo"] = t_servo
-                    last_servo_send = now
-                    last_heartbeat = now
-                except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-                    _log_net_error("Error enviando angulo de servo", e)
+                    if t_span != current_state["servo_pan"]:
+                        urllib.request.urlopen(f"{URL_SERVO}?ang={t_span}", timeout=0.08)
+                        current_state["servo_pan"] = t_span
+                    if t_stilt != current_state["servo_tilt"]:
+                        urllib.request.urlopen(f"{URL_SERVO2}?ang={t_stilt}", timeout=0.08)
+                        current_state["servo_tilt"] = t_stilt
+                    last_servo_send = last_heartbeat = now
+                except Exception as e: _log_net_error("Servo error", e)
                     
-        # C. Control de LED (Limitado a una vez cada 200ms)
-        if force_send or t_r != current_state["led_r"] or t_g != current_state["led_g"] or t_b != current_state["led_b"]:
+        # C. LEDs (todos juntos con /leds)
+        if force_send or t_l1 != current_state["led1"] or t_l2 != current_state["led2"] or t_l3 != current_state["led3"]:
             if now - last_led_send >= 0.20:
-                url = f"{URL_LED}?r={t_r}&g={t_g}&b={t_b}"
                 try:
+                    url = f"http://{ESP32_IP}/leds?l1r={t_l1[0]}&l1g={t_l1[1]}&l1b={t_l1[2]}&l2r={t_l2[0]}&l2g={t_l2[1]}&l2b={t_l2[2]}&l3r={t_l3[0]}&l3g={t_l3[1]}"
                     urllib.request.urlopen(url, timeout=0.08)
-                    current_state["led_r"], current_state["led_g"], current_state["led_b"] = t_r, t_g, t_b
-                    last_led_send = now
-                    last_heartbeat = now
-                except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-                    _log_net_error("Error enviando estado de LED", e)
+                    current_state["led1"] = t_l1
+                    current_state["led2"] = t_l2
+                    current_state["led3"] = t_l3
+                    last_led_send = last_heartbeat = now
+                except Exception as e: _log_net_error("LED error", e)
 
 # ==========================================
 # HILO DE VIDEO
@@ -317,10 +314,8 @@ def video_thread():
                             if img is not None:
                                 frame_buffer.append(img)
                     else:
-                        # Si el marcador de fin está antes del de inicio, limpiamos el residuo corrupto
                         buf = buf[a:]
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-            print(f"[Video] Reconectando... ({e})")
             time.sleep(1)
 
 # ==========================================
@@ -332,30 +327,47 @@ def telemetry_thread():
         time.sleep(0.15)
 
 # ==========================================
-# LÓGICA DE BÚSQUEDA 360° (Radar Visual - No Bloqueante)
+# LÓGICA DE BÚSQUEDA 360°
 # ==========================================
 def buscar_con_radar():
-    global servo_pos, servo_dir, ultimo_objetivo_dir, ultimo_barrido_t
+    global servo_pan_pos, servo_tilt_pos, scan_pan_dir, scan_tilt_dir, ultimo_barrido_t
     ahora = time.time()
-    # Realizar barrido de servo cada 200ms
-    if ahora - ultimo_barrido_t >= 0.20:
+    
+    # Realizar barrido de servo cada 150ms
+    if ahora - ultimo_barrido_t >= 0.15:
         ultimo_barrido_t = ahora
-        servo_pos += servo_dir * 15
-        if servo_pos >= 150:
-            servo_pos = 150
-            servo_dir = -1
-        elif servo_pos <= 30:
-            servo_pos = 30
-            servo_dir = 1
-        servo(servo_pos)
+        
+        # Movimiento horizontal (pan)
+        servo_pan_pos += scan_pan_dir * 15
+        
+        if servo_pan_pos >= 150:
+            servo_pan_pos = 150
+            scan_pan_dir = -1
+            # Bajar un poco la mirada al llegar al extremo
+            servo_tilt_pos -= 15
+        elif servo_pan_pos <= 30:
+            servo_pan_pos = 30
+            scan_pan_dir = 1
+            # Bajar un poco la mirada al llegar al extremo
+            servo_tilt_pos -= 15
+            
+        if servo_tilt_pos < 60:
+            servo_tilt_pos = 120 # Resetear mirada arriba
+            # Al completar un barrido vertical, girar el robot
+            mover(1200, -1200)
+            time.sleep(0.3)
+            mover(0, 0)
+            
+        servo_pan(servo_pan_pos)
+        servo_tilt(servo_tilt_pos)
 
 # ==========================================
 # CEREBRO PRINCIPAL
 # ==========================================
 def brain_loop():
-    global running, estado_actual, ultimo_objetivo_dir, maniobra_tipo, maniobra_inicio_t
+    global running, estado_actual, maniobra_tipo, maniobra_inicio_t
 
-    cv2.namedWindow("ARVE ELITE v6.0", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow("ARVE ELITE v7.0", cv2.WINDOW_AUTOSIZE)
     prev_time = time.time()
     beep_dado = False
 
@@ -368,7 +380,7 @@ def brain_loop():
         h, w = frame.shape[:2]
         centro_x = w // 2
 
-        # --- CONTROL DE MANIOBRA TEMPORIZADA NO BLOQUEANTE ---
+        # --- CONTROL DE MANIOBRA TEMPORIZADA ---
         ahora = time.time()
         if maniobra_tipo is not None:
             if maniobra_tipo == "esquivar":
@@ -376,153 +388,147 @@ def brain_loop():
                 if duracion < 0.3:
                     estado_actual = "OBSTACULO: RETROCEDIENDO..."
                     mover(-1200, -1200)
-                    led(1, 0, 0)
+                    led(1, 4095, 0, 0) # LED1 Rojo
                 elif duracion < 0.6:
                     estado_actual = "OBSTACULO: EVITANDO..."
                     mover(1200, -1200)
-                    led(1, 0, 0)
                 else:
-                    maniobra_tipo = None  # Fin de la maniobra
+                    maniobra_tipo = None
             elif maniobra_tipo == "rodear":
                 duracion = ahora - maniobra_inicio_t
                 if duracion < 0.3:
                     estado_actual = "⚠ PELIGROSO: RETROCEDIENDO..."
                     mover(-1000, -1000)
-                    led(1, 0, 1)
+                    led(3, 4095, 0, 0) # LED3 Rojo (Alerta)
                 elif duracion < 0.6:
                     estado_actual = "⚠ PELIGROSO: EVITANDO..."
                     mover(1500, -1500)
-                    led(1, 0, 1)
                 else:
-                    maniobra_tipo = None  # Fin de la maniobra
+                    maniobra_tipo = None
 
-            # Dibujar HUD y mostrar frame (nos saltamos la IA)
+            # Render HUD durante maniobra
             curr_time = time.time()
             fps = 1.0 / max((curr_time - prev_time), 0.001)
             prev_time = curr_time
-            cv2.rectangle(frame, (0,0), (w,38), (15,15,15), -1)
-            color_fps = (0,255,0) if fps > 10 else (0,165,255)
-            cv2.putText(frame, f"FPS: {int(fps)}", (8,25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_fps, 2)
-            cv2.putText(frame, f"RTX 3050 | CUDA: {str(device).upper()}", (105,25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,255), 1)
             cv2.rectangle(frame, (0,h-40), (w,h), (15,15,15), -1)
             cv2.putText(frame, estado_actual, (8, h-15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 1)
-            cv2.putText(frame, f"DIST: {dist_frontal}cm | SERVO: {servo_pos}°", (w-180, h-15), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255,255,0), 1)
-            cv2.line(frame, (centro_x-15, h//2), (centro_x+15, h//2), (255,255,255), 1)
-            cv2.line(frame, (centro_x, h//2-15), (centro_x, h//2+15), (255,255,255), 1)
-            cv2.imshow("ARVE ELITE v5.0", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                running = False
-                mover(0, 0)
-                led(0, 0, 0)
-                break
+            cv2.imshow("ARVE ELITE v7.0", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'): running = False
             continue
 
-        # --- IA ---
-        results = model.predict(frame, verbose=False, conf=0.35,
-                                imgsz=320, half=use_half, device=device)
-        detecciones = results[0].boxes
-
-        mejor_basura  = None  # (x_centro, area, nombre, coords)
-        mayor_area    = 0
-        hay_persona   = False
-
-        for box in detecciones:
-            cls  = int(box.cls[0])
-            c    = box.xyxy[0].cpu().numpy().astype(int)
-            area = (c[2]-c[0]) * (c[3]-c[1])
-
-            if cls == PERSON_CLASS:
+        # --- IA DUAL ---
+        # 1. Detectar Personas (COCO)
+        results_coco = model_coco.predict(frame, verbose=False, conf=0.50, imgsz=320, half=use_half, device=device)
+        hay_persona = False
+        
+        for box in results_coco[0].boxes:
+            if int(box.cls[0]) == PERSON_CLASS:
                 hay_persona = True
+                c = box.xyxy[0].cpu().numpy().astype(int)
                 cv2.rectangle(frame, (c[0],c[1]), (c[2],c[3]), (0,0,255), 3)
-                cv2.putText(frame, "⚠ PERSONA - STOP", (c[0], c[1]-8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+                cv2.putText(frame, "⚠ PERSONA - STOP", (c[0], c[1]-8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+                break
 
-            elif cls in TRASH_CLASSES and area > mayor_area:
-                nombre, material, color = TRASH_CLASSES[cls]
-                es_peligroso = cls in DANGEROUS_CLASSES
-                mayor_area = area
-                mejor_basura = ((c[0]+c[2])//2, area, nombre, material, color, c, es_peligroso)
-                
-                cv2.rectangle(frame, (c[0],c[1]), (c[2],c[3]), color, 2)
-                etiqueta = f"{'⚠ PELIGROSO' if es_peligroso else nombre} [{material}]"
-                cv2.putText(frame, etiqueta, (c[0], c[1]-8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        # 2. Detectar Basura (TACO) - Resolución 416 para detectar cosas pequeñas (3cm-8cm)
+        results_taco = model_taco.predict(frame, verbose=False, conf=0.35, imgsz=416, half=use_half, device=device)
+        
+        mejor_basura = None
+        mayor_area = 0
+
+        for box in results_taco[0].boxes:
+            cls = int(box.cls[0])
+            if cls in TRASH_CLASSES:
+                c = box.xyxy[0].cpu().numpy().astype(int)
+                area = (c[2]-c[0]) * (c[3]-c[1])
+                if area > mayor_area:
+                    mayor_area = area
+                    nombre, material, color_rgb = TRASH_CLASSES[cls]
+                    es_peligroso = cls in DANGEROUS_CLASSES
+                    mejor_basura = ((c[0]+c[2])//2, area, nombre, material, color_rgb, c, es_peligroso)
+                    
+                color_bgr = (color_rgb[2], color_rgb[1], color_rgb[0])
+                cv2.rectangle(frame, (c[0],c[1]), (c[2],c[3]), color_bgr, 2)
+                etiqueta = f"{TRASH_CLASSES[cls][0]} [{TRASH_CLASSES[cls][1]}]"
+                cv2.putText(frame, etiqueta, (c[0], c[1]-8), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color_bgr, 2)
 
         # ================================================
         # TOMA DE DECISIONES
         # ================================================
         if hay_persona:
-            # PRIORIDAD 1: Persona detectada → STOP total
             estado_actual = Estado.PELIGRO
             mover(0, 0)
-            servo(90)
-            led(1, 0, 0)
+            servo_pan(90)
+            servo_tilt(90)
+            led(1, 4095, 0, 0) # LED1 Rojo (Estado: Peligro)
+            led(3, 4095, 0, 0) # LED3 Rojo (Alerta)
             beep_dado = False
 
         elif mejor_basura:
-            # PRIORIDAD 2: Hay basura → Analizar y actuar
-            tx, area, nombre, material, color_det, coords, es_peligroso = mejor_basura
-            ultimo_objetivo_dir = "derecha" if tx > centro_x else "izquierda"
+            tx, area, nombre, material, color_rgb, coords, es_peligroso = mejor_basura
             error_x = tx - centro_x
 
-            # Ajustar servo de cámara hacia el objetivo
-            servo_objetivo = int(servo_pos + (-error_x / w) * 60)
-            servo_objetivo = max(30, min(150, servo_objetivo))
-            servo(servo_objetivo)
+            # Ajustar servo pan
+            nuevo_pan = int(servo_pan_pos + (-error_x / w) * 60)
+            servo_pan(max(30, min(150, nuevo_pan)))
+            
+            # Ajustar servo tilt basado en el centro Y de la deteccion (simplificado)
+            # Para apuntar la camara hacia abajo a medida que se acerca
+            
+            # Actualizar LEDs
+            led(1, 0, 4095, 0) # LED1 Verde (Avanzando)
+            # Mapear color a LED2 (R, G, B de 0 a 4095)
+            # Si material es PLASTICO -> verde, VIDRIO -> azul, METAL -> amarillo, etc.
+            if material == "PLASTICO": led(2, 0, 4095, 0)
+            elif material == "VIDRIO": led(2, 0, 0, 4095)
+            elif material == "METAL": led(2, 4095, 4095, 0)
+            elif material == "PAPEL" or material == "CARTON": led(2, 4095, 2000, 0) # Naranja
+            elif material == "ORGANICO": led(2, 4095, 1000, 0)
+            else: led(2, 4095, 4095, 4095) # Blanco
 
             if es_peligroso:
-                # Objeto peligroso (cuchillo, tijera) → Iniciar maniobra no bloqueante
                 estado_actual = "⚠ OBJETO PELIGROSO: RODEANDO"
-                led(1, 0, 1)  # Magenta = Peligro especial
+                led(3, 4095, 0, 0) # LED3 Rojo
                 if not beep_dado:
                     beep(3)
                     beep_dado = True
-                # Iniciar maniobra no bloqueante
                 maniobra_tipo = "rodear"
                 maniobra_inicio_t = time.time()
 
             elif emergencia or (0 < dist_frontal < 20):
-                # Llegó al objetivo → detenerse
-                estado_actual = f"LLEGÓ: {nombre} [{material}]"
+                estado_actual = f"LLEGÓ: {nombre}"
                 mover(0, 0)
-                led(1, 1, 0)  # Amarillo = En el objetivo
+                led(3, 0, 4095, 0) # LED3 Verde
                 if not beep_dado:
                     beep(2)
                     beep_dado = True
 
             elif abs(error_x) < 40:
-                # Centrado → avanzar directo
-                estado_actual = f"AVANZANDO → {nombre} [{material}]"
+                estado_actual = f"AVANZANDO → {nombre}"
                 mover(1800, 1800)
-                led(0, 1, 0)
+                led(3, 0, 4095, 0)
                 beep_dado = False
 
             elif error_x > 0:
-                # Basura a la derecha → girar derecha
                 estado_actual = f"GIRANDO DER → {nombre}"
                 mover(1600, -1600)
-                led(0, 0, 1)
             else:
-                # Basura a la izquierda → girar izquierda
                 estado_actual = f"GIRANDO IZQ → {nombre}"
                 mover(-1600, 1600)
-                led(0, 0, 1)
 
         else:
-            # PRIORIDAD 3: No ve nada → Buscar con radar
             estado_actual = Estado.BUSCANDO
             beep_dado = False
+            led(1, 0, 0, 4095) # LED1 Azul (Buscando)
+            led(2, 0, 0, 0)    # LED2 Apagado
+            led(3, 0, 4095, 0) # LED3 Verde
 
             if emergencia or (0 < dist_frontal < 25):
-                # Hay obstáculo → Iniciar maniobra no bloqueante
                 estado_actual = Estado.ESQUIVANDO
                 maniobra_tipo = "esquivar"
                 maniobra_inicio_t = time.time()
             else:
-                # Modo radar: mover servo y avanzar lentamente (no bloqueante)
                 buscar_con_radar()
-                mover(600, -600)     # Giro lento sobre su eje
-                led(0, 0, 1)         # Azul = Buscando
+                mover(600, -600)
 
         # ================================================
         # HUD PROFESIONAL
@@ -531,57 +537,43 @@ def brain_loop():
         fps = 1.0 / max((curr_time - prev_time), 0.001)
         prev_time = curr_time
 
-        # Barra superior
         cv2.rectangle(frame, (0,0), (w,38), (15,15,15), -1)
         color_fps = (0,255,0) if fps > 10 else (0,165,255)
-        cv2.putText(frame, f"FPS: {int(fps)}", (8,25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_fps, 2)
-        cv2.putText(frame, f"RTX 3050 | CUDA: {str(device).upper()}", (105,25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,255), 1)
+        cv2.putText(frame, f"FPS: {int(fps)}", (8,25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_fps, 2)
+        cv2.putText(frame, f"RTX 3050 | CUDA: {str(device).upper()}", (105,25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,255), 1)
 
-        # Barra inferior (diseño de doble línea profesional para evitar solapamiento)
         cv2.rectangle(frame, (0, h-50), (w, h), (15, 15, 15), -1)
-        # Línea 1: Estado actual del robot
-        cv2.putText(frame, estado_actual, (8, h-30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 255, 0), 1)
-        # Línea 2: Telemetría de sensores
-        cv2.putText(frame, f"DIST: {dist_frontal}cm | SERVO: {servo_pos}°",
-                    (8, h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 0), 1)
+        cv2.putText(frame, estado_actual, (8, h-30), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 255, 0), 1)
+        cv2.putText(frame, f"DIST: {dist_frontal}cm | PAN: {servo_pan_pos}° TILT: {servo_tilt_pos}°", (8, h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 0), 1)
 
-        # Cruz central (mira de la cámara)
         cv2.line(frame, (centro_x-15, h//2), (centro_x+15, h//2), (255,255,255), 1)
         cv2.line(frame, (centro_x, h//2-15), (centro_x, h//2+15), (255,255,255), 1)
 
-        cv2.imshow("ARVE ELITE v5.0", frame)
+        cv2.imshow("ARVE ELITE v7.0", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             running = False
             mover(0, 0)
-            led(0, 0, 0)
             break
 
-# ==========================================
-# MAIN
-# ==========================================
 if __name__ == "__main__":
     print("=" * 50)
-    print("  ARVE ELITE v6.0 - SISTEMA AUTÓNOMO ACTIVO")
+    print("  ARVE ELITE v7.0 - SISTEMA AUTÓNOMO ACTIVO")
     print("=" * 50)
     print(f"  IA Device  : {device.upper()}")
-    print(f"  Modelo IA  : {modelo_path}")
     print(f"  ESP32 IP   : {ESP32_IP}")
     print(f"  Presiona Q : salir")
     print("=" * 50)
 
     threading.Thread(target=video_thread,          daemon=True).start()
-    threading.Thread(target=telemetry_thread,        daemon=True).start()
+    threading.Thread(target=telemetry_thread,      daemon=True).start()
     threading.Thread(target=command_sender_thread, daemon=True).start()
     try:
         brain_loop()
     except KeyboardInterrupt:
-        print("[WARN] Interrupción por teclado.")
+        pass
     finally:
         running = False
         mover(0, 0)
-        led(0, 0, 0)
+        led(1,0,0,0); led(2,0,0,0); led(3,0,0,0)
         cv2.destroyAllWindows()
         print("[!] Sistema ARVE apagado.")

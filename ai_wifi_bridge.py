@@ -15,12 +15,15 @@ import numpy as np
 import requests
 from ultralytics import YOLO
 
-# Valores por defecto extraidos del dataset.yaml (solo "basura")
+# Valores por defecto extraidos del dataset.yaml TACO (inglés)
 DEFAULT_CLASSES = [
-    "botella_plastico",
-    "lata_aluminio",
-    "carton",
-    "papel",
+    "Clear plastic bottle",
+    "Other plastic bottle",
+    "Drink can",
+    "Food Can",
+    "Paper bag",
+    "Normal paper",
+    "Corrugated carton"
 ]
 
 

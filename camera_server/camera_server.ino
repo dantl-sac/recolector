@@ -1,7 +1,7 @@
 // ================================================
-// ARVE ELITE - FIRMWARE ESP32-CAM v6.2 (WiFi)
+// ARVE ELITE - FIRMWARE ESP32-CAM v7.0 (WiFi)
 // Componentes: ESP32-CAM AI Thinker, TB6612FNG,
-// PCA9685, HC-SR04 x2, Servo SG90, LED RGB, Buzzer.
+// PCA9685, HC-SR04 x2, Servo SG90 x2, LED RGB x3, Buzzer.
 // ================================================
 #include "esp_camera.h"
 #include <WiFi.h>
@@ -50,6 +50,9 @@ IPAddress subnet(255, 255, 255, 0);
 #define I2C_SDA     13
 #define I2C_SCL     12
 
+// Buzzer Activo en GPIO 2 (reemplaza PCA9685)
+#define BUZZER_PIN  2
+
 // Ultrasonico frontal
 #define TRIG_F      14
 #define ECHO_F      15
@@ -85,11 +88,16 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 #define M2_PWM   3    // Motor 2 PWM
 #define M2_IN1   4    // Motor 2 Direccion A
 #define M2_IN2   5    // Motor 2 Direccion B
-#define SERVO_CAM 6   // Servo de la camara (canal 6 del PCA9685)
-#define LED_R    7    // LED RGB - Rojo
-#define LED_G    8    // LED RGB - Verde
-#define LED_B    9    // LED RGB - Azul
-#define BUZZER   10   // Buzzer 5V
+#define SERVO_PAN 6   // Servo 1 (Rotacion Horizontal)
+#define SERVO_TILT 7  // Servo 2 (Inclinacion Vertical)
+#define LED1_R   8    // LED RGB 1 - Rojo (Estado)
+#define LED1_G   9    // LED RGB 1 - Verde
+#define LED1_B   10   // LED RGB 1 - Azul
+#define LED2_R   11   // LED RGB 2 - Rojo (Material)
+#define LED2_G   12   // LED RGB 2 - Verde
+#define LED2_B   13   // LED RGB 2 - Azul
+#define LED3_R   14   // LED RGB 3 - Rojo (Alerta)
+#define LED3_G   15   // LED RGB 3 - Verde (No hay canal para azul)
 
 // ================================================
 // VARIABLES DE ESTADO
@@ -100,7 +108,8 @@ volatile bool emergencia = false;
 unsigned long t_ultrasonido = 0;
 unsigned long t_tcs = 0;
 unsigned long t_wifi = 0;
-int servo_angulo = 90; // 90 = centro/frente
+int servo_pan_angulo = 90; // 90 = centro
+int servo_tilt_angulo = 90; // 90 = centro
 int color_detectado = 0; // 0=nada, 1=plastico, 2=carton, 3=metal
 bool modo_auto = false;
 int velocidad_base = 1800;
@@ -112,7 +121,6 @@ int ai_dist_cm = 0;
 float ai_conf = 0.0f;
 unsigned long t_ai_ms = 0;
 const unsigned long AI_TIMEOUT_MS = 1200;
-// Umbral minimo de confianza para que el ESP32 actue sobre la deteccion AI
 const float AI_CONF_THRESHOLD = 0.60f;
 String ai_class = "";
 bool explore_forward = true;
@@ -124,6 +132,13 @@ const unsigned long WIFI_RETRY_MS = 4000;
 const unsigned long WIFI_CONNECT_TIMEOUT_MS = 3000;
 int wifi_fail_count = 0;
 bool wifi_use_static = true;
+
+// Escaneo automatico
+bool modo_scan = false;
+unsigned long t_scan = 0;
+int scan_pan_dir = 1;
+int scan_pan_pos = 30;
+int scan_tilt_pos = 60;
 
 // ================================================
 // FUNCIONES AUXILIARES
@@ -198,23 +213,42 @@ int angulo_a_pwm(int angulo) {
 	return map(angulo, 0, 180, 102, 512);
 }
 
-void setServo(int angulo) {
-	servo_angulo = constrain(angulo, 0, 180);
-	pwm.setPWM(SERVO_CAM, 0, angulo_a_pwm(servo_angulo));
+void setServoPan(int angulo) {
+	servo_pan_angulo = constrain(angulo, 0, 180);
+	pwm.setPWM(SERVO_PAN, 0, angulo_a_pwm(servo_pan_angulo));
 }
 
-void setLED(int r, int g, int b) {
-	// PCA9685: 0=OFF, 4095=ON para canales LED (maximo valido)
-	pwm.setPWM(LED_R, 0, r ? 4095 : 0);
-	pwm.setPWM(LED_G, 0, g ? 4095 : 0);
-	pwm.setPWM(LED_B, 0, b ? 4095 : 0);
+void setServoTilt(int angulo) {
+	servo_tilt_angulo = constrain(angulo, 0, 180);
+	pwm.setPWM(SERVO_TILT, 0, angulo_a_pwm(servo_tilt_angulo));
+}
+
+void setLED(int id, int r, int g, int b) {
+	// PCA9685: 0=OFF, 4095=ON (maximo) para brillo variable (PWM gradual)
+	r = constrain(r, 0, 4095);
+	g = constrain(g, 0, 4095);
+	b = constrain(b, 0, 4095);
+    
+    if (id == 1) {
+        pwm.setPWM(LED1_R, 0, r);
+        pwm.setPWM(LED1_G, 0, g);
+        pwm.setPWM(LED1_B, 0, b);
+    } else if (id == 2) {
+        pwm.setPWM(LED2_R, 0, r);
+        pwm.setPWM(LED2_G, 0, g);
+        pwm.setPWM(LED2_B, 0, b);
+    } else if (id == 3) {
+        pwm.setPWM(LED3_R, 0, r);
+        pwm.setPWM(LED3_G, 0, g);
+        // No hay canal B para LED3
+    }
 }
 
 void beep(int veces) {
 	for (int i = 0; i < veces; i++) {
-		pwm.setPWM(BUZZER, 0, 4095);    // ON (maximo valido)
+        digitalWrite(BUZZER_PIN, HIGH);
 		delay(100);
-		pwm.setPWM(BUZZER, 0, 0);       // OFF
+        digitalWrite(BUZZER_PIN, LOW);
 		delay(80);
 	}
 }
@@ -316,7 +350,12 @@ void handle_move() {
 }
 
 void handle_servo() {
-	setServo(server.arg("ang").toInt());
+	if (server.hasArg("ang")) setServoPan(server.arg("ang").toInt());
+	server.send(200, "text/plain", "OK");
+}
+
+void handle_servo2() {
+	if (server.hasArg("ang")) setServoTilt(server.arg("ang").toInt());
 	server.send(200, "text/plain", "OK");
 }
 
@@ -326,8 +365,32 @@ void handle_beep() {
 }
 
 void handle_led() {
-	setLED(server.arg("r").toInt(), server.arg("g").toInt(), server.arg("b").toInt());
+    int id = 1;
+    if (server.hasArg("n")) id = server.arg("n").toInt();
+    int r = server.hasArg("r") ? server.arg("r").toInt() : 0;
+    int g = server.hasArg("g") ? server.arg("g").toInt() : 0;
+    int b = server.hasArg("b") ? server.arg("b").toInt() : 0;
+    
+    // Si viene en formato 0-1 antiguo, escalar a 0-4095
+    if (r == 1) r = 4095;
+    if (g == 1) g = 4095;
+    if (b == 1) b = 4095;
+    
+	setLED(id, r, g, b);
 	server.send(200, "text/plain", "OK");
+}
+
+void handle_leds() {
+    if (server.hasArg("l1r") && server.hasArg("l1g") && server.hasArg("l1b")) {
+        setLED(1, server.arg("l1r").toInt(), server.arg("l1g").toInt(), server.arg("l1b").toInt());
+    }
+    if (server.hasArg("l2r") && server.hasArg("l2g") && server.hasArg("l2b")) {
+        setLED(2, server.arg("l2r").toInt(), server.arg("l2g").toInt(), server.arg("l2b").toInt());
+    }
+    if (server.hasArg("l3r") && server.hasArg("l3g")) {
+        setLED(3, server.arg("l3r").toInt(), server.arg("l3g").toInt(), 0);
+    }
+    server.send(200, "text/plain", "OK");
 }
 
 void handle_status() {
@@ -335,12 +398,11 @@ void handle_status() {
 	json += "\"dist_f\":" + String(dist_frontal > 0 ? dist_frontal : 0) + ",";
 	json += "\"dist_r\":" + String(dist_trasera > 0 ? dist_trasera : 0) + ",";
 	json += "\"emergencia\":" + String(emergencia ? "true" : "false") + ",";
-	json += "\"servo\":" + String(servo_angulo) + ",";
+	json += "\"servo_pan\":" + String(servo_pan_angulo) + ",";
+	json += "\"servo_tilt\":" + String(servo_tilt_angulo) + ",";
 	json += "\"material\":" + String(color_detectado) + ",";
-	json += "\"rear_ultrasonic\":" + String(USE_REAR_ULTRASONIC ? "true" : "false") + ",";
-	json += "\"tcs_enabled\":" + String(USE_TCS3200 ? "true" : "false") + ",";
-	json += "\"lite_mode\":" + String(LITE_MODE ? "true" : "false") + ",";
 	json += "\"modo_auto\":" + String(modo_auto ? "true" : "false") + ",";
+	json += "\"modo_scan\":" + String(modo_scan ? "true" : "false") + ",";
 	json += "\"velocidad_base\":" + String(velocidad_base) + ",";
 	json += "\"obstaculo_cm\":" + String(obstaculo_cm) + ",";
 	json += "\"ai_x\":" + String(ai_x, 3) + ",";
@@ -374,12 +436,27 @@ void handle_mode() {
 	m.toLowerCase();
 	if (m == "auto") {
 		modo_auto = true;
+        modo_scan = false;
 	} else if (m == "manual") {
 		modo_auto = false;
+        modo_scan = false;
 		setMotor(1, 0);
 		setMotor(2, 0);
 	}
 	server.send(200, "text/plain", "OK");
+}
+
+void handle_scan() {
+    modo_scan = true;
+    modo_auto = false;
+    scan_pan_pos = 30;
+    scan_tilt_pos = 120;
+    scan_pan_dir = 1;
+    setMotor(1, 0);
+    setMotor(2, 0);
+    setServoPan(scan_pan_pos);
+    setServoTilt(scan_tilt_pos);
+    server.send(200, "text/plain", "OK");
 }
 
 void handle_speed() {
@@ -402,14 +479,14 @@ void handle_threshold() {
 void handle_root() {
 	String html = "<!doctype html><html><head><meta charset='utf-8'>";
 	html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-	html += "<title>ARVE Control</title>";
+	html += "<title>ARVE Control v7.0</title>";
 	html += "<style>body{font-family:Arial;margin:16px;background:#101418;color:#e6e6e6;}";
 	html += ".grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:360px;}";
 	html += "button{padding:12px;border:0;border-radius:8px;background:#2b3038;color:#fff;font-size:16px;}";
 	html += "button:active{background:#3a414c;} .row{margin:12px 0;}";
 	html += "input{width:100%;} a{color:#6ab0ff;}";
 	html += "</style></head><body>";
-	html += "<h2>ARVE Control WiFi</h2>";
+	html += "<h2>ARVE Control WiFi v7.0</h2>";
 	html += "<div class='row grid'>";
 	html += "<button onclick=move(0,0)>STOP</button>";
 	html += "<button onclick=move(base,base)>AVANZAR</button>";
@@ -419,19 +496,18 @@ void handle_root() {
 	html += "<button onclick=beep(2)>BEEP</button>";
 	html += "</div>";
 	html += "<div class='row'>";
-	html += "<label>Servo <span id='servoVal'>90</span></label>";
+	html += "<label>Pan <span id='servoVal'>90</span></label>";
 	html += "<input type='range' min='0' max='180' value='90' oninput='setServo(this.value)'>";
-	html += "</div>";
-	html += "<div class='row'>";
-	html += "</div>";
-	html += "<div class='row'>";
+    html += "<label>Tilt <span id='servo2Val'>90</span></label>";
+	html += "<input type='range' min='0' max='180' value='90' oninput='setServo2(this.value)'>";
 	html += "</div>";
 	html += "<div class='row grid'>";
-	html += "<button onclick=setLed(1,0,0)>LED R</button>";
-	html += "<button onclick=setLed(0,1,0)>LED G</button>";
-	html += "<button onclick=setLed(0,0,1)>LED B</button>";
-	html += "<button onclick=setMode(""manual"")>MANUAL</button>";
-	html += "<button onclick=setMode(""auto"")>AUTO</button>";
+	html += "<button onclick=setLed(1,4095,0,0)>LED1 R</button>";
+	html += "<button onclick=setLed(2,0,4095,0)>LED2 G</button>";
+	html += "<button onclick=setLed(3,0,0,4095)>LED3 B</button>";
+	html += "<button onclick=setMode(\"manual\")>MANUAL</button>";
+	html += "<button onclick=setMode(\"auto\")>AUTO</button>";
+    html += "<button onclick=scan()>SCAN 360</button>";
 	html += "<a href='http://" + WiFi.localIP().toString() + ":81' target='_blank'>Stream</a>";
 	html += "</div>";
 	html += "<pre id='status'></pre>";
@@ -444,9 +520,11 @@ void handle_root() {
 	html += "function api(p){fetch(p).catch(()=>{});}";
 	html += "function move(v1,v2){api('/move?v1='+v1+'&v2='+v2);}";
 	html += "function setServo(a){document.getElementById('servoVal').textContent=a;api('/servo?ang='+a);}";
-	html += "function setLed(r,g,b){api('/led?r='+r+'&g='+g+'&b='+b);}";
+    html += "function setServo2(a){document.getElementById('servo2Val').textContent=a;api('/servo2?ang='+a);}";
+	html += "function setLed(n,r,g,b){api('/led?n='+n+'&r='+r+'&g='+g+'&b='+b);}";
 	html += "function beep(n){api('/beep?n='+n);}";
 	html += "function setMode(m){api('/mode?m='+m);}";
+    html += "function scan(){api('/scan');}";
 	html += "function setBase(v){base=parseInt(v);document.getElementById('baseVal').textContent=v;api('/speed?base='+v+'&turn='+turn);}";
 	html += "function setObs(v){document.getElementById('obsVal').textContent=v;api('/threshold?cm='+v);}";
 	html += "setInterval(()=>fetch('/status').then(r=>r.json()).then(j=>{document.getElementById('status').textContent=JSON.stringify(j,null,2);}).catch(()=>{}),1000);";
@@ -478,13 +556,22 @@ void setup() {
 #endif
 #endif
 
+    // Buzzer activo
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);
+
 	Wire.begin(I2C_SDA, I2C_SCL);
 	pwm.begin();
 	pwm.setPWMFreq(50); // 50Hz para servos
 
 	// Posicion inicial del servo (centro)
-	setServo(90);
-	setLED(0, 0, 1); // Azul = Iniciando
+	setServoPan(90);
+    setServoTilt(90);
+    
+    // LEDs inicio
+	setLED(1, 0, 0, 4095); // LED1 Azul = Iniciando
+    setLED(2, 0, 0, 0);
+    setLED(3, 0, 0, 0);
 	beep(1);
 
 	// Camara
@@ -515,7 +602,7 @@ void setup() {
 
 	if (esp_camera_init(&config) != ESP_OK) {
 		Serial.println("ERROR CAMARA");
-		setLED(1, 0, 0); // Rojo = Error
+		setLED(1, 4095, 0, 0); // Rojo = Error
 		return;
 	}
 
@@ -532,22 +619,25 @@ void setup() {
 	xTaskCreatePinnedToCore(stream_task, "stream_task", 8192, NULL, 1, NULL, 0);
 	server.on("/move",   handle_move);
 	server.on("/servo",  handle_servo);
+    server.on("/servo2", handle_servo2);
 	server.on("/beep",   handle_beep);
 	server.on("/led",    handle_led);
+    server.on("/leds",   handle_leds);
 	server.on("/status", handle_status);
 	server.on("/mode",   handle_mode);
+    server.on("/scan",   handle_scan);
 	server.on("/speed",  handle_speed);
 	server.on("/threshold", handle_threshold);
 	server.on("/ai", handle_ai);
 	server.on("/", handle_root);
 	server.begin();
 
-	setLED(0, 1, 0); // Verde = Online
+	setLED(1, 0, 4095, 0); // Verde = Online
 	beep(2);
 	if (WiFi.status() == WL_CONNECTED) {
-		Serial.printf("\nARVE ELITE v6.2 ONLINE - %s\n", WiFi.localIP().toString().c_str());
+		Serial.printf("\nARVE ELITE v7.0 ONLINE - %s\n", WiFi.localIP().toString().c_str());
 	} else {
-		Serial.println("\nARVE ELITE v6.2 ONLINE - WiFi pendiente");
+		Serial.println("\nARVE ELITE v7.0 ONLINE - WiFi pendiente");
 	}
 }
 
@@ -573,13 +663,13 @@ void loop() {
 			if (!emergencia) {
 				emergencia = true;
 				setMotor(1, 0); setMotor(2, 0);
-				setLED(1, 0, 0); // Rojo = Peligro
+				setLED(3, 4095, 0, 0); // LED3 Rojo = Peligro
 				beep(3);
 				Serial.println("EMERGENCIA: OBSTACULO!");
 			}
 		} else {
 			emergencia = false;
-			setLED(0, 1, 0); // Verde = OK
+			setLED(3, 0, 4095, 0); // LED3 Verde = OK
 		}
 	}
 
@@ -591,6 +681,31 @@ void loop() {
 	}
 #endif
 
+    // Logica Scan 360 interno ESP32
+    if (modo_scan && (ahora - t_scan >= 100)) {
+        t_scan = ahora;
+        scan_pan_pos += scan_pan_dir * 15;
+        
+        if (scan_pan_pos >= 150) {
+            scan_pan_pos = 150;
+            scan_pan_dir = -1;
+            scan_tilt_pos -= 20; // baja la mirada
+        } else if (scan_pan_pos <= 30) {
+            scan_pan_pos = 30;
+            scan_pan_dir = 1;
+            scan_tilt_pos -= 20; // baja la mirada
+        }
+        
+        if (scan_tilt_pos < 60) {
+            // termino un ciclo de barrido
+            scan_tilt_pos = 120; // resetea
+        }
+        
+        setServoPan(scan_pan_pos);
+        setServoTilt(scan_tilt_pos);
+    }
+
+    // Modo automatico basico (sin IA externa o IA detectada)
 	if (modo_auto && (ahora - t_auto >= 150)) {
 		t_auto = ahora;
 		bool obstaculo = (dist_frontal > 0 && dist_frontal < obstaculo_cm);
