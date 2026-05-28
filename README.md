@@ -9,16 +9,13 @@ Robot autónomo basado en **ESP32-CAM** con visión artificial (**YOLOv8**) capa
 | # | Componente | Función |
 |---|-----------|---------|
 | 1 | ESP32-CAM (OV2640) | Cámara + Microcontrolador WiFi |
-| 2 | Chasis 2WD + 2 Motores TT | Desplazamiento |
-| 3 | Driver Motor TB6612FNG | Control de motores |
-| 4 | PCA9685 (16 canales PWM) | Servos + LEDs vía I2C |
-| 5 | 2× Servo SG90 | Pan (horizontal) + Tilt (vertical, 45° al suelo) |
-| 6 | 2× HC-SR04 | Ultrasonido frontal y trasero |
-| 7 | TCS3200 | Sensor de color (perfil alternativo) |
-| 8 | LM2596 | Regulador Step-Down (3S → 5V) |
-| 9 | 3× Batería 18650 Li-ion 3.7V | Alimentación (11.1V en serie) |
-| 10 | 3× LED RGB | Estado, Material, Alerta |
-| 11 | Buzzer 5V Activo | Alertas sonoras |
+| 2 | Chasis 2WD + 2 Motores DC | Desplazamiento |
+| 3 | Driver Motor TB6612FNG | Control de los 2 motores DC |
+| 4 | PCA9685 (16 canales PWM) | Servos + motores vía I2C |
+| 5 | 2× Micro Servo TS90A (9g) | Pan (horizontal) + Tilt (vertical, 45° al suelo) |
+| 6 | HC-SR04 | Ultrasonido frontal (anti-choque) |
+| 7 | LM2596 | Regulador Step-Down a 5V |
+| 8 | Batería Li-ion | Alimentación (entra al LM2596) |
 
 ---
 
@@ -28,14 +25,14 @@ Robot autónomo basado en **ESP32-CAM** con visión artificial (**YOLOv8**) capa
 esp32-yolo-camera/
 ├── camera_server/
 │   └── camera_server.ino       ← Firmware ESP32-CAM (subir con Arduino IDE)
-├── arve_super_brain.py          ← Cerebro IA principal (ejecutar en PC)
-├── entrenar_profesional_v7.py   ← Pipeline de entrenamiento RTX 3050
-├── ai_wifi_bridge.py            ← Bridge WiFi PC ↔ ESP32
-├── dataset.yaml                 ← Configuración 61 clases (60 TACO + persona)
-└── dataset_taco/                ← Dataset local (no se sube a git)
-    ├── images/train/
-    ├── images/val/
-    └── labels/
+├── arve_super_brain_v8.py       ← Cerebro IA autónomo (ejecutar en PC)
+├── arve_viewer.py               ← Visor + control manual/auto por teclado
+├── entrenar_v8_pro.py           ← Pipeline de entrenamiento RTX 3050 (12 clases)
+├── check_gpu.py                 ← Verifica CUDA / RTX
+├── test_conexion.py             ← Diagnóstico de red al ESP32
+├── dataset_pro_v8/              ← Dataset local 12 clases (no se sube a git)
+│   └── dataset.yaml
+└── arve_best.pt                 ← Modelo entrenado (no se sube a git)
 ```
 
 ---
@@ -52,17 +49,13 @@ esp32-yolo-camera/
 | CH 5 | Motor 2 — IN2 |
 | CH 6 | Servo Pan (horizontal) |
 | CH 7 | Servo Tilt (vertical, default 135° = 45° al suelo) |
-| CH 8-10 | LED RGB 1 — Estado |
-| CH 11-13 | LED RGB 2 — Material |
-| CH 14-15 | LED RGB 3 — Alerta |
 
 | GPIO ESP32 | Componente |
 |-----------|-----------|
-| GPIO 2 | Buzzer 5V activo |
-| GPIO 12 | I2C SCL → PCA9685 |
-| GPIO 13 | I2C SDA → PCA9685 |
-| GPIO 14 | HC-SR04 Frontal TRIG |
-| GPIO 15 | HC-SR04 Frontal ECHO |
+| GPIO 12 | HC-SR04 Frontal TRIG |
+| GPIO 13 | HC-SR04 Frontal ECHO |
+| GPIO 14 | I2C SDA → PCA9685 |
+| GPIO 15 | I2C SCL → PCA9685 |
 
 ---
 
@@ -73,32 +66,34 @@ Abrir `camera_server/camera_server.ino` en **Arduino IDE** y subir a la ESP32-CA
 
 ### 2. Entrenar la IA (RTX 3050)
 ```bash
-python entrenar_profesional_v7.py
+python entrenar_v8_pro.py
 ```
 - Detecta automáticamente la GPU CUDA
-- Usa **YOLOv8 Medium** con batch 16
-- Target: **mAP50 ≥ 0.90**
+- Usa **YOLOv8 Medium** con 12 clases de basura pequeña
 - Al terminar copia el mejor modelo como `arve_best.pt`
 
 ### 3. Ejecutar el Robot Autónomo
 ```bash
-python arve_super_brain.py
+python arve_super_brain_v8.py
 ```
 - Carga **2 modelos simultáneos**: TACO (basura) + COCO (personas)
 - Escaneo 360° con patrón de serpentina (Pan 30°–150° + Tilt 60°–120°)
 - Tilt por defecto a **135° (45° hacia el suelo)** para detectar basura de 3–8 cm
-- LEDs dinámicos: Azul=buscando, Verde=avanzando, Rojo=peligro
+- El estado se muestra en la ventana de la PC (buscando / avanzando / persona)
 
-### 4. Bridge WiFi (opcional)
+> **Nota:** la IP del ESP32 está fija en `arve_super_brain_v8.py` (variable `ESP32_IP`). Cámbiala por la IP real de tu ESP32.
+
+### 4. Visor + control manual (opcional)
 ```bash
-python ai_wifi_bridge.py --esp32-ip 192.168.137.100
+python arve_viewer.py --esp32-ip 192.168.137.100
 ```
+- Control por teclado: `W/A/S/D` mover, flechas servos, `M` auto/manual, `Y` YOLO on/off, `+/-` velocidad
 
 ---
 
-## 🎯 Clases Detectadas (TACO Dataset)
-60 clases de basura: botellas plásticas, latas, cartón, papel, vidrio, colillas, bolsas, etc.  
-+ 1 clase especial: **persona** (detención de seguridad automática).
+## 🎯 Clases Detectadas (12 clases)
+Bolsa plástica, botella, lata, papel, colilla, pitillo/sorbete, vaso plástico, cartón, envoltorio, recipiente de comida, tapa de botella, icopor/espuma.  
++ **persona** (vía modelo COCO, detención de seguridad automática).
 
 ---
 
@@ -109,13 +104,12 @@ python ai_wifi_bridge.py --esp32-ip 192.168.137.100
 | `/move` | `v1`, `v2` (-4095 a 4095) | Control de motores |
 | `/servo` | `ang` (0–180) | Servo Pan |
 | `/servo2` | `ang` (0–180) | Servo Tilt |
-| `/led` | `n` (1-3), `r`,`g`,`b` (0–4095) | LED RGB individual |
-| `/leds` | `l1r,l1g,l1b,l2r...` | Todos los LEDs |
-| `/beep` | `n` (veces) | Buzzer |
-| `/scan` | — | Iniciar escaneo 360° |
 | `/mode` | `m=auto\|manual` | Cambiar modo |
+| `/speed` | `base`, `turn` (500–4095) | Velocidad base / de giro |
+| `/ai` | `x`, `dist`, `conf`, `cls` | Inyectar datos de IA |
 | `/status` | — | Estado JSON del robot |
-| `/ai` | `x,dist,conf,cls` | Inyectar datos de IA |
+| `/res` | `s=qqvga\|qvga\|hvga\|vga` | Resolución de cámara |
+| `/quality` | `q` (5–60) | Calidad JPEG |
 
 ---
 

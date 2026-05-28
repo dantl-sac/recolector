@@ -1,7 +1,7 @@
 """
-ARVE SUPER BRAIN v7.0 - CEREBRO DEFINITIVO
-Integra: 2 Motores, 2 Servos (Pan+Tilt), 3 LEDs RGB, Sensor Color,
-         2x Ultrasonido, RTX 3050 (YOLO TACO + COCO Personas), Escaneo 360°
+ARVE SUPER BRAIN v8.0 - CEREBRO DEFINITIVO
+Integra: 2 Motores, 2 Servos (Pan+Tilt), Ultrasonido HC-SR04,
+         RTX 3050 (YOLO TACO + COCO Personas), Escaneo 360°
 Modelo: Usa arve_best.pt (entrenado TACO) y yolov8n.pt (COCO) simultaneamente
 """
 import cv2
@@ -13,6 +13,7 @@ import urllib.request
 import urllib.error
 import torch
 import os
+import argparse
 from collections import deque
 
 # Optimización NVIDIA
@@ -21,13 +22,18 @@ torch.backends.cudnn.benchmark = True
 # ==========================================
 # CONFIGURACIÓN
 # ==========================================
-ESP32_IP   = "192.168.137.100"
+# La IP del ESP32 se puede pasar por linea de comandos:
+#   python arve_super_brain_v8.py --esp32-ip 192.168.137.100
+_ap = argparse.ArgumentParser(description="ARVE Super Brain v8.0")
+_ap.add_argument("--esp32-ip", default="192.168.137.100",
+                 help="IP del ESP32-CAM (default: 192.168.137.100)")
+_args, _ = _ap.parse_known_args()
+
+ESP32_IP   = _args.esp32_ip
 URL_STREAM = f"http://{ESP32_IP}:81/"
 URL_MOVE   = f"http://{ESP32_IP}/move"
 URL_SERVO  = f"http://{ESP32_IP}/servo"
 URL_SERVO2 = f"http://{ESP32_IP}/servo2"
-URL_BEEP   = f"http://{ESP32_IP}/beep"
-URL_LED    = f"http://{ESP32_IP}/led"
 URL_STATUS = f"http://{ESP32_IP}/status"
 
 # Clases dinámicas TACO (v8 optimizado 12 clases)
@@ -111,10 +117,6 @@ target_state = {
     "v2": 0,
     "servo_pan": 90,
     "servo_tilt": 135,
-    "led1": (0, 0, 4095), # Estado (Azul)
-    "led2": (0, 0, 0),    # Material (Apagado)
-    "led3": (0, 4095, 0), # Alerta (Verde)
-    "beep": 0
 }
 target_state_lock = threading.Lock()
 
@@ -123,9 +125,6 @@ current_state = {
     "v2": None,
     "servo_pan": None,
     "servo_tilt": None,
-    "led1": None,
-    "led2": None,
-    "led3": None
 }
 
 # ==========================================
@@ -151,16 +150,6 @@ def servo_tilt(ang):
     with target_state_lock:
         target_state["servo_tilt"] = ang
 
-def led(n, r, g, b):
-    with target_state_lock:
-        if n == 1: target_state["led1"] = (r, g, b)
-        elif n == 2: target_state["led2"] = (r, g, b)
-        elif n == 3: target_state["led3"] = (r, g, b)
-
-def beep(n=1):
-    with target_state_lock:
-        target_state["beep"] = n
-
 def get_status():
     global dist_frontal, emergencia
     try:
@@ -178,36 +167,19 @@ def command_sender_thread():
     last_heartbeat = 0.0
     last_motor_send = 0.0
     last_servo_send = 0.0
-    last_led_send = 0.0
-    
+
     print("[*] Hilo de control de hardware asíncrono activo...")
     while running:
         time.sleep(0.01)
-        
-        # 1. Beep prioritario
-        beeps_to_send = 0
-        with target_state_lock:
-            if target_state["beep"] > 0:
-                beeps_to_send = target_state["beep"]
-                target_state["beep"] = 0
-                
-        if beeps_to_send > 0:
-            try:
-                urllib.request.urlopen(f"{URL_BEEP}?n={beeps_to_send}", timeout=0.5)
-            except: pass
-            continue
-            
+
         with target_state_lock:
             t_v1, t_v2 = target_state["v1"], target_state["v2"]
             t_span = target_state["servo_pan"]
             t_stilt = target_state["servo_tilt"]
-            t_l1 = target_state["led1"]
-            t_l2 = target_state["led2"]
-            t_l3 = target_state["led3"]
-            
+
         now = time.time()
         force_send = (now - last_heartbeat > 2.5)
-        
+
         # A. Motores
         es_parada = (t_v1 == 0 and t_v2 == 0 and (current_state["v1"] != 0 or current_state["v2"] != 0))
         if force_send or t_v1 != current_state["v1"] or t_v2 != current_state["v2"]:
@@ -217,7 +189,7 @@ def command_sender_thread():
                     current_state["v1"], current_state["v2"] = t_v1, t_v2
                     last_motor_send = last_heartbeat = now
                 except Exception as e: _log_net_error("Move error", e)
-                    
+
         # B. Servos
         if force_send or t_span != current_state["servo_pan"] or t_stilt != current_state["servo_tilt"]:
             if now - last_servo_send >= 0.12:
@@ -230,18 +202,6 @@ def command_sender_thread():
                         current_state["servo_tilt"] = t_stilt
                     last_servo_send = last_heartbeat = now
                 except Exception as e: _log_net_error("Servo error", e)
-                    
-        # C. LEDs (todos juntos con /leds)
-        if force_send or t_l1 != current_state["led1"] or t_l2 != current_state["led2"] or t_l3 != current_state["led3"]:
-            if now - last_led_send >= 0.20:
-                try:
-                    url = f"http://{ESP32_IP}/leds?l1r={t_l1[0]}&l1g={t_l1[1]}&l1b={t_l1[2]}&l2r={t_l2[0]}&l2g={t_l2[1]}&l2b={t_l2[2]}&l3r={t_l3[0]}&l3g={t_l3[1]}"
-                    urllib.request.urlopen(url, timeout=0.08)
-                    current_state["led1"] = t_l1
-                    current_state["led2"] = t_l2
-                    current_state["led3"] = t_l3
-                    last_led_send = last_heartbeat = now
-                except Exception as e: _log_net_error("LED error", e)
 
 # ==========================================
 # HILO DE VIDEO
@@ -319,9 +279,8 @@ def buscar_con_radar():
 def brain_loop():
     global running, estado_actual, maniobra_tipo, maniobra_inicio_t
 
-    cv2.namedWindow("ARVE ELITE v7.0", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow("ARVE ELITE v8.0", cv2.WINDOW_AUTOSIZE)
     prev_time = time.time()
-    beep_dado = False
 
     while running:
         if not frame_buffer:
@@ -340,7 +299,6 @@ def brain_loop():
                 if duracion < 0.3:
                     estado_actual = "OBSTACULO: RETROCEDIENDO..."
                     mover(-1200, -1200)
-                    led(1, 4095, 0, 0) # LED1 Rojo
                 elif duracion < 0.6:
                     estado_actual = "OBSTACULO: EVITANDO..."
                     mover(1200, -1200)
@@ -351,7 +309,6 @@ def brain_loop():
                 if duracion < 0.3:
                     estado_actual = "⚠ PELIGROSO: RETROCEDIENDO..."
                     mover(-1000, -1000)
-                    led(3, 4095, 0, 0) # LED3 Rojo (Alerta)
                 elif duracion < 0.6:
                     estado_actual = "⚠ PELIGROSO: EVITANDO..."
                     mover(1500, -1500)
@@ -364,7 +321,7 @@ def brain_loop():
             prev_time = curr_time
             cv2.rectangle(frame, (0,h-40), (w,h), (15,15,15), -1)
             cv2.putText(frame, estado_actual, (8, h-15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 1)
-            cv2.imshow("ARVE ELITE v7.0", frame)
+            cv2.imshow("ARVE ELITE v8.0", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'): running = False
             continue
 
@@ -411,9 +368,6 @@ def brain_loop():
             mover(0, 0)
             servo_pan(90)
             servo_tilt(90)
-            led(1, 4095, 0, 0) # LED1 Rojo (Estado: Peligro)
-            led(3, 4095, 0, 0) # LED3 Rojo (Alerta)
-            beep_dado = False
 
         elif mejor_basura:
             tx, area, nombre, material, color_rgb, coords, es_peligroso = mejor_basura
@@ -422,43 +376,19 @@ def brain_loop():
             # Ajustar servo pan
             nuevo_pan = int(servo_pan_pos + (-error_x / w) * 60)
             servo_pan(max(30, min(150, nuevo_pan)))
-            
-            # Ajustar servo tilt basado en el centro Y de la deteccion (simplificado)
-            # Para apuntar la camara hacia abajo a medida que se acerca
-            
-            # Actualizar LEDs
-            led(1, 0, 4095, 0) # LED1 Verde (Avanzando)
-            # Mapear color a LED2 (R, G, B de 0 a 4095)
-            # Si material es PLASTICO -> verde, VIDRIO -> azul, METAL -> amarillo, etc.
-            if material == "PLASTICO": led(2, 0, 4095, 0)
-            elif material == "VIDRIO": led(2, 0, 0, 4095)
-            elif material == "METAL": led(2, 4095, 4095, 0)
-            elif material == "PAPEL" or material == "CARTON": led(2, 4095, 2000, 0) # Naranja
-            elif material == "ORGANICO": led(2, 4095, 1000, 0)
-            else: led(2, 4095, 4095, 4095) # Blanco
 
             if es_peligroso:
                 estado_actual = "⚠ OBJETO PELIGROSO: RODEANDO"
-                led(3, 4095, 0, 0) # LED3 Rojo
-                if not beep_dado:
-                    beep(3)
-                    beep_dado = True
                 maniobra_tipo = "rodear"
                 maniobra_inicio_t = time.time()
 
             elif emergencia or (0 < dist_frontal < 20):
                 estado_actual = f"LLEGÓ: {nombre}"
                 mover(0, 0)
-                led(3, 0, 4095, 0) # LED3 Verde
-                if not beep_dado:
-                    beep(2)
-                    beep_dado = True
 
             elif abs(error_x) < 40:
                 estado_actual = f"AVANZANDO → {nombre}"
                 mover(1800, 1800)
-                led(3, 0, 4095, 0)
-                beep_dado = False
 
             elif error_x > 0:
                 estado_actual = f"GIRANDO DER → {nombre}"
@@ -469,10 +399,6 @@ def brain_loop():
 
         else:
             estado_actual = Estado.BUSCANDO
-            beep_dado = False
-            led(1, 0, 0, 4095) # LED1 Azul (Buscando)
-            led(2, 0, 0, 0)    # LED2 Apagado
-            led(3, 0, 4095, 0) # LED3 Verde
 
             if emergencia or (0 < dist_frontal < 25):
                 estado_actual = Estado.ESQUIVANDO
@@ -501,7 +427,7 @@ def brain_loop():
         cv2.line(frame, (centro_x-15, h//2), (centro_x+15, h//2), (255,255,255), 1)
         cv2.line(frame, (centro_x, h//2-15), (centro_x, h//2+15), (255,255,255), 1)
 
-        cv2.imshow("ARVE ELITE v7.0", frame)
+        cv2.imshow("ARVE ELITE v8.0", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             running = False
             mover(0, 0)
@@ -509,7 +435,7 @@ def brain_loop():
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  ARVE ELITE v7.0 - SISTEMA AUTÓNOMO ACTIVO")
+    print("  ARVE ELITE v8.0 - SISTEMA AUTÓNOMO ACTIVO")
     print("=" * 50)
     print(f"  IA Device  : {device.upper()}")
     print(f"  ESP32 IP   : {ESP32_IP}")
@@ -526,6 +452,5 @@ if __name__ == "__main__":
     finally:
         running = False
         mover(0, 0)
-        led(1,0,0,0); led(2,0,0,0); led(3,0,0,0)
         cv2.destroyAllWindows()
         print("[!] Sistema ARVE apagado.")

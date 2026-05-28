@@ -1,33 +1,48 @@
-# AI WiFi Bridge (PC -> ESP32)
+# IA por WiFi (PC -> ESP32)
 
-This lets the PC run YOLO and send detections to the ESP32 over WiFi.
+La PC ejecuta YOLO y le envía las detecciones al ESP32 por WiFi.
+El script encargado de esto es **`arve_viewer.py`** (visor + control + envío de IA).
 
-## How it works
-1) ESP32 streams video on port 81.
-2) PC reads the stream and runs YOLO.
-3) PC sends x-center, distance and confidence to the ESP32.
-4) ESP32 uses that data in AUTO mode.
+## Cómo funciona
+1) El ESP32 transmite video MJPEG en el puerto 81.
+2) La PC lee el stream y corre YOLO (en la RTX 3050 si hay CUDA).
+3) La PC envía al ESP32: centro-x (0–1), distancia estimada, confianza y clase.
+4) El ESP32 usa esos datos en modo AUTO para perseguir el objeto.
 
-## Run
-From the project folder:
+## Ejecutar
+Desde la carpeta del proyecto:
 
 ```bash
-python ai_wifi_bridge.py --esp32-ip 192.168.137.100 --model arve_best.pt --calib ai_calibration.json
+python arve_viewer.py --esp32-ip 192.168.137.100 --model arve_best.pt
 ```
 
-## Notes
-- The distance is estimated using:
-  distance_cm = (real_width_cm * focal) / box_width_px
-- You can improve accuracy with ai_calibration.json (per-class widths).
-- You can restrict detections to trash classes:
-  --classes "Bottle,Drink can,Food Can,Plastic bag"
-- You can adjust confidence:
-  - --conf 0.55
-  - --focal 615
-  - --real-w 7.0
+Si solo quieres ver el video sin IA:
 
-## ESP32 endpoints
-- /ai?x=0.50&dist=35&conf=0.82&cls=Bottle
-- /mode?m=auto
-- /mode?m=manual
-- /status
+```bash
+python arve_viewer.py --esp32-ip 192.168.137.100 --no-ai
+```
+
+## Opciones útiles (flags reales)
+| Flag | Default | Descripción |
+|------|---------|-------------|
+| `--esp32-ip` | (obligatorio) | IP del ESP32-CAM |
+| `--model` | `yolov8n.pt` | Modelo YOLO (usa `arve_best.pt` para basura) |
+| `--conf` | `0.40` | Umbral de confianza |
+| `--no-ai` | — | Solo video, sin YOLO |
+| `--device` | `cuda` | `cuda` o `cpu` |
+| `--imgsz` | `416` | Tamaño de inferencia |
+| `--skip` | `2` | Corre YOLO cada N frames (rendimiento) |
+| `--start-res` | `qvga` | Resolución de cámara (`qqvga`/`qvga`/`hvga`/`vga`) |
+| `--quality` | `20` | Calidad JPEG (5–60) |
+
+## Notas
+- La distancia es una **estimación simple** a partir del ancho de la caja:
+  `dist_cm ≈ 15000 / ancho_en_px` (más ancho = más cerca).
+- El modo AUTO se activa con la tecla `M` o enviando `/mode?m=auto`.
+
+## Endpoints del ESP32 que usa
+- `/ai?x=0.50&dist=35&conf=0.82&cls=Bottle`  ← inyecta la detección
+- `/mode?m=auto` / `/mode?m=manual`
+- `/move?v1=..&v2=..`
+- `/servo?ang=..` / `/servo2?ang=..`
+- `/status`
